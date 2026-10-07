@@ -14,34 +14,54 @@
   </div>
   <div id="shade" aria-hidden="true"></div>
 
-  <main>
-    <header class="hero">
+  <!-- 3x3 layout: each widget is placed into one of these slots (Settings → Layout) -->
+  <div id="stage" class="stage">
+    <div class="row" data-row="top">
+      <div class="cell" data-slot="top-left" data-col="left"></div>
+      <div class="cell" data-slot="top-center" data-col="center"></div>
+      <div class="cell" data-slot="top-right" data-col="right"></div>
+    </div>
+    <div class="row" data-row="middle">
+      <div class="cell" data-slot="middle-left" data-col="left"></div>
+      <div class="cell" data-slot="middle-center" data-col="center"></div>
+      <div class="cell" data-slot="middle-right" data-col="right"></div>
+    </div>
+    <div class="row" data-row="bottom">
+      <div class="cell" data-slot="bottom-left" data-col="left"></div>
+      <div class="cell" data-slot="bottom-center" data-col="center"></div>
+      <div class="cell" data-slot="bottom-right" data-col="right"></div>
+    </div>
+  </div>
+
+  <!-- Widgets (moved into their slots on load) -->
+  <div id="widgets" hidden>
+    <div class="widget" data-w="clock">
       <div id="clock" class="clock" aria-live="off"></div>
       <div id="date" class="date"></div>
-    </header>
+    </div>
 
-    <div id="sections" class="sections" aria-label="Bookmarks"></div>
-  </main>
+    <div class="widget" data-w="bookmarks">
+      <div id="sections" class="sections" aria-label="Bookmarks"></div>
+    </div>
 
-  <!-- Photo credit -->
-  <a id="credit" class="chip glass" target="_blank" rel="noopener" hidden>
-    <span class="credit-dot"></span><span id="creditText"></span>
-  </a>
+    <div class="widget" data-w="credit">
+      <a id="credit" class="chip glass" target="_blank" rel="noopener" hidden>
+        <span class="credit-dot"></span><span id="creditText"></span>
+      </a>
+    </div>
 
-  <!-- Dock -->
-  <nav id="dock" class="dock glass" aria-label="Wallpaper themes">
-    <div id="cats" class="cats"><span id="pill" class="pill"></span></div>
-    <span class="sep"></span>
-    <button id="galleryBtn" class="dock-btn" title="Wallpaper gallery" aria-label="Wallpaper gallery">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="9" cy="9" r="1.8"/><path d="m21 15-5-5L5 21"/></svg>
-    </button>
-    <button id="nextBtn" class="dock-btn" title="Next wallpaper" aria-label="Next wallpaper">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
-    </button>
-    <button id="settingsBtn" class="dock-btn" title="Settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
-    </button>
-  </nav>
+    <div class="widget" data-w="settings">
+      <button id="settingsBtn" class="round-btn glass" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Layout edit bar -->
+  <div id="editBar" class="edit-bar glass" hidden>
+    <span>Drag the clock, bookmarks, credit or settings button to any spot</span>
+    <button id="editDone" class="btn small solid">Done</button>
+  </div>
 
   <!-- Folder sheet -->
   <div id="modal" class="overlay hidden">
@@ -51,12 +71,32 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg>
         </button>
         <h2 id="modalTitle">Folder</h2>
+        <button id="unpackBtn" class="btn ghost small" title="Show this folder's bookmarks directly on the home screen">Show on home screen</button>
         <button id="closeModal" class="icon-btn" aria-label="Close">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
         </button>
       </div>
       <div id="modalGrid" class="grid"></div>
+      <p id="modalHint" class="fine">Hover a bookmark and click <b>↗</b> to move it out of this folder onto your Bookmarks bar.</p>
     </div>
+  </div>
+
+  <!-- Right-click menu for a bookmark -->
+  <div id="ctx" class="ctx glass" role="menu" hidden></div>
+
+  <!-- Edit bookmark dialog -->
+  <div id="editDlg" class="overlay hidden">
+    <form id="editForm" class="sheet glass edit-sheet" autocomplete="off">
+      <div class="sheet-head"><h2 id="editTitle">Edit bookmark</h2></div>
+      <label class="edit-field"><span>Name</span><input id="editName" type="text" required></label>
+      <label class="edit-field" id="editUrlRow"><span>URL</span><input id="editUrl" type="text" spellcheck="false"></label>
+      <p id="editErr" class="fine err" hidden></p>
+      <div class="edit-actions">
+        <button type="button" id="editCancel" class="btn ghost">Cancel</button>
+        <button type="submit" class="btn solid">Save</button>
+      </div>
+      <p class="fine">Changes are saved to your Chrome bookmarks.</p>
+    </form>
   </div>
 
   <!-- Wallpaper gallery -->
@@ -71,19 +111,101 @@
       </div>
       <div id="galleryTabs" class="tabs"></div>
       <div id="galleryGrid" class="thumbs"></div>
-      <p class="fine">Featured pictures from Wikimedia Commons — public domain or free licences. Credit is shown bottom-left.</p>
+      <p class="fine">Featured pictures from Wikimedia Commons — public domain or free licences. Photo credit appears on the page (position it in Settings → Layout).</p>
     </div>
   </div>
 
-  <!-- Settings -->
-  <aside id="settings" class="panel glass" aria-hidden="true">
-    <div class="sheet-head">
-      <h2>Settings</h2>
-      <button id="closeSettings" class="icon-btn" aria-label="Close">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
-      </button>
+  <!-- Settings window -->
+  <div id="settings" class="overlay settings-overlay" aria-hidden="true">
+    <div class="settings-win glass" role="dialog" aria-label="Settings">
+      <nav class="side">
+        <div class="side-title">Settings</div>
+        <button class="nav-item" data-tab="layout"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg><span>Layout</span></button>
+        <button class="nav-item" data-tab="bookmarks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg><span>Bookmarks</span></button>
+        <button class="nav-item" data-tab="sections"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Sections &amp; folders</span></button>
+        <button class="nav-item" data-tab="clock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Clock</span></button>
+        <button class="nav-item" data-tab="wallpaper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.8"/><path d="m21 15-5-5L5 21"/></svg><span>Wallpaper</span></button>
+        <div class="side-foot">
+          <button id="clearBg" class="btn ghost full" aria-pressed="false" title="Remove the blur and tint behind this window so you can see the wallpaper">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
+            <span>Unblur background</span>
+          </button>
+          <button id="resetBtn" class="btn ghost full">Reset to defaults</button>
+        </div>
+      </nav>
+      <div class="content">
+        <button id="closeSettings" class="icon-btn close-x" aria-label="Close">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+        <section class="pane" data-tab="layout">
+          <header class="pane-head"><h2>Layout</h2><p>Place the clock, bookmarks and buttons anywhere on the page.</p></header>
+    <div class="group">
+      <div class="group-title">Layout</div>
+      <button id="editLayout" class="btn solid full">Edit layout on page</button>
+      <div class="pos-row"><span>Bookmarks</span><div class="pos-picker" data-w="bookmarks"><button data-slot="top-left" title="top left"></button><button data-slot="top-center" title="top center"></button><button data-slot="top-right" title="top right"></button><button data-slot="middle-left" title="middle left"></button><button data-slot="middle-center" title="middle center"></button><button data-slot="middle-right" title="middle right"></button><button data-slot="bottom-left" title="bottom left"></button><button data-slot="bottom-center" title="bottom center"></button><button data-slot="bottom-right" title="bottom right"></button></div></div>
+      <div class="pos-row"><span>Clock</span><div class="pos-picker" data-w="clock"><button data-slot="top-left" title="top left"></button><button data-slot="top-center" title="top center"></button><button data-slot="top-right" title="top right"></button><button data-slot="middle-left" title="middle left"></button><button data-slot="middle-center" title="middle center"></button><button data-slot="middle-right" title="middle right"></button><button data-slot="bottom-left" title="bottom left"></button><button data-slot="bottom-center" title="bottom center"></button><button data-slot="bottom-right" title="bottom right"></button></div><input id="showClock" type="checkbox" class="switch" title="Show clock"></div>
+      <div class="pos-row"><span>Photo credit</span><div class="pos-picker" data-w="credit"><button data-slot="top-left" title="top left"></button><button data-slot="top-center" title="top center"></button><button data-slot="top-right" title="top right"></button><button data-slot="middle-left" title="middle left"></button><button data-slot="middle-center" title="middle center"></button><button data-slot="middle-right" title="middle right"></button><button data-slot="bottom-left" title="bottom left"></button><button data-slot="bottom-center" title="bottom center"></button><button data-slot="bottom-right" title="bottom right"></button></div><input id="showCredit" type="checkbox" class="switch" title="Show photo credit"></div>
+      <div class="pos-row"><span>Settings button</span><div class="pos-picker" data-w="settings"><button data-slot="top-left" title="top left"></button><button data-slot="top-center" title="top center"></button><button data-slot="top-right" title="top right"></button><button data-slot="middle-left" title="middle left"></button><button data-slot="middle-center" title="middle center"></button><button data-slot="middle-right" title="middle right"></button><button data-slot="bottom-left" title="bottom left"></button><button data-slot="bottom-center" title="bottom center"></button><button data-slot="bottom-right" title="bottom right"></button></div></div>
+      <button id="resetLayout" class="btn ghost full">Reset layout</button>
     </div>
-
+        </section>
+        <section class="pane" data-tab="bookmarks">
+          <header class="pane-head"><h2>Bookmarks</h2><p>Size, spacing and alignment of your bookmark icons.</p></header>
+    <div class="group">
+      <div class="group-title">Bookmarks</div>
+      <label class="slider">
+        <span>Tile size <output id="outTile"></output></span>
+        <input id="setTile" type="range" min="80" max="170" step="2">
+      </label>
+      <label class="slider">
+        <span>Icons per row <output id="outCols"></output></span>
+        <input id="setCols" type="range" min="3" max="12">
+      </label>
+      <div class="row-field">
+        <span>Icon alignment</span>
+        <div id="setAlign" class="seg">
+          <button data-v="auto" title="Follow the bookmarks position">Auto</button>
+          <button data-v="start" title="Left">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M4 12h10M4 18h13"/></svg>
+          </button>
+          <button data-v="center" title="Centre">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M7 12h10M5.5 18h13"/></svg>
+          </button>
+          <button data-v="end" title="Right">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 6h16M10 12h10M7 18h13"/></svg>
+          </button>
+        </div>
+      </div>
+      <label class="row-field">
+        <span>Glass panel behind bookmarks</span>
+        <input id="setPanel" type="checkbox" class="switch">
+      </label>
+      <label class="row-field">
+        <span>Show names</span>
+        <input id="setLabels" type="checkbox" class="switch">
+      </label>
+      <div class="custom-row">
+        <button id="refreshIcons" class="btn ghost">Refresh icons</button>
+        <button id="resetOrder" class="btn ghost">Reset order</button>
+      </div>
+      <p class="fine">Tip: drag tiles to rearrange them.</p>
+    </div>
+        </section>
+        <section class="pane" data-tab="sections">
+          <header class="pane-head"><h2>Sections &amp; folders</h2><p>Group bookmarks into sections, hide them, or unpack folders.</p></header>
+    <div class="group">
+      <div class="group-title">Sections</div>
+      <div id="secList" class="sec-list"></div>
+      <button id="addSection" class="btn ghost full">+ Add section</button>
+    </div>
+    <div class="group">
+      <div class="group-title">Bookmarks bar</div>
+      <p class="fine">Pick a section for each bookmark, or hide it. Folders can be <b>unpacked</b> so their bookmarks show directly on the home screen.</p>
+      <div id="bmList" class="bm-list"></div>
+    </div>
+        </section>
+        <section class="pane" data-tab="clock">
+          <header class="pane-head"><h2>Clock</h2><p>Style, size and format of the clock and date.</p></header>
     <div class="group">
       <div class="group-title">Clock</div>
       <label class="row-field">
@@ -98,10 +220,25 @@
         <span>24-hour clock</span>
         <input id="setClock" type="checkbox" class="switch">
       </label>
+      <label class="row-field">
+        <span>Show date</span>
+        <input id="setDate" type="checkbox" class="switch">
+      </label>
+      <label class="slider">
+        <span>Clock size <output id="outClockSize"></output></span>
+        <input id="setClockSize" type="range" min="40" max="200" step="4">
+      </label>
     </div>
-
+        </section>
+        <section class="pane" data-tab="wallpaper">
+          <header class="pane-head"><h2>Wallpaper</h2><p>Choose a theme, pick a photo, or use your own image.</p></header>
     <div class="group">
       <div class="group-title">Wallpaper</div>
+      <div id="themeChips" class="tabs compact"></div>
+      <div class="custom-row first">
+        <button id="nextBtn" class="btn">↻ Next wallpaper</button>
+        <button id="galleryBtn" class="btn">Browse gallery</button>
+      </div>
       <label class="row-field">
         <span>Change wallpaper</span>
         <select id="setRotate">
@@ -125,38 +262,10 @@
         <button id="removeCustom" class="btn ghost" hidden>Remove</button>
       </div>
     </div>
-
-    <div class="group">
-      <div class="group-title">Icons</div>
-      <label class="slider">
-        <span>Tile size <output id="outTile"></output></span>
-        <input id="setTile" type="range" min="80" max="160" step="4">
-      </label>
-      <label class="row-field">
-        <span>Show names</span>
-        <input id="setLabels" type="checkbox" class="switch">
-      </label>
-      <div class="custom-row">
-        <button id="refreshIcons" class="btn ghost">Refresh icons</button>
-        <button id="resetOrder" class="btn ghost">Reset order</button>
+        </section>
       </div>
-      <p class="fine">Tip: drag tiles to rearrange them.</p>
     </div>
-
-    <div class="group">
-      <div class="group-title">Sections</div>
-      <div id="secList" class="sec-list"></div>
-      <button id="addSection" class="btn ghost full">+ Add section</button>
-    </div>
-
-    <div class="group">
-      <div class="group-title">Bookmarks bar</div>
-      <p class="fine">Pick a section for each bookmark, or hide it. You can also drag tiles between sections.</p>
-      <div id="bmList" class="bm-list"></div>
-    </div>
-
-    <button id="resetBtn" class="btn ghost full">Reset to defaults</button>
-  </aside>
+  </div>
 
   <script src="js/main.js"></script>
 </body>

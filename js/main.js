@@ -1,4 +1,4 @@
-/* Glass Home v2 — modern new tab */
+/* Glass Home — modern new tab */
 (() => {
   'use strict';
 
@@ -14,8 +14,16 @@
     rotate: 'never',     // never | tab | hour | day
     blur: 0,
     dim: 25,
-    tile: 112,
+    tile: 120,
+    cols: 8,             // max icons per row
+    align: 'auto',       // icon alignment: auto (follows position) | start | center | end
+    panel: false,        // glass panel behind bookmarks
     labels: true,
+    clockSize: 84,
+    showDate: true,
+    layout: { bookmarks: 'middle-center', clock: 'top-left', credit: 'bottom-left', settings: 'bottom-right' },
+    show: { clock: true, credit: true },
+    unpack: [],          // folder ids whose bookmarks show directly on the page
     sections: [{ id: 'main', name: 'Bookmarks' }],
     assign: {},          // bookmark id -> section id | 'hidden'
     collapsed: [],       // collapsed section ids
@@ -45,6 +53,11 @@
     r.setProperty('--blur', S.blur + 'px');
     r.setProperty('--dim', S.dim / 100);
     r.setProperty('--tile', S.tile + 'px');
+    r.setProperty('--cols', S.cols);
+    r.setProperty('--clock-size', S.clockSize + 'px');
+    document.body.classList.toggle('bm-panel', !!S.panel);
+    document.body.dataset.align = S.align || 'auto';
+    document.body.classList.toggle('no-date', !S.showDate);
     document.body.classList.toggle('no-labels', !S.labels);
     document.body.dataset.font = S.font;
   }
@@ -314,41 +327,125 @@
     changeWallpaper();
   }
 
-  /* ================= Dock ================= */
-  function buildDock() {
-    const wrap = $('#cats');
-    wrap.querySelectorAll('.cat').forEach((b) => b.remove());
+  /* ================= Wallpaper themes (in Settings) ================= */
+  function buildThemes() {
+    const wrap = $('#themeChips');
+    wrap.innerHTML = '';
     const list = [...CATS.map((c) => [c.id, c.label]), ['mix', 'Mix']];
-    if (S.cat === 'custom') list.push(['custom', 'Mine']);
+    if (S.cat === 'custom') list.push(['custom', 'My image']);
     list.forEach(([id, label]) => {
       const b = document.createElement('button');
-      b.className = 'cat'; b.dataset.id = id; b.textContent = label;
+      b.className = 'tab'; b.dataset.id = id; b.textContent = label;
+      b.classList.toggle('active', S.cat === id);
       b.onclick = () => {
-        if (S.cat === id && id !== 'custom') return changeWallpaper();
-        S.cat = id; save(); movePill(); changeWallpaper();
+        if (S.cat === id && id === 'custom') return;
+        S.cat = id; save(); buildThemes(); changeWallpaper();
       };
       wrap.appendChild(b);
     });
-    requestAnimationFrame(movePill);
-  }
-  function movePill() {
-    const btn = $(`.cat[data-id="${S.cat}"]`);
-    document.querySelectorAll('.cat').forEach((b) => b.classList.toggle('active', b === btn));
-    const pill = $('#pill');
-    if (!btn) { pill.style.width = 0; return; }
-    pill.style.left = btn.offsetLeft + 'px';
-    pill.style.width = btn.offsetWidth + 'px';
-    btn.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
   }
   $('#nextBtn').onclick = () => changeWallpaper();
+
+  /* ================= Layout ================= */
+  const WIDGETS = ['clock', 'bookmarks', 'credit', 'settings'];
+  const SLOTS = ['top', 'middle', 'bottom'].flatMap((r) => ['left', 'center', 'right'].map((c) => `${r}-${c}`));
+  const widgetEl = (w) => document.querySelector(`.widget[data-w="${w}"]`);
+
+  function placeWidgets() {
+    WIDGETS.forEach((w) => {
+      const slot = SLOTS.includes(S.layout[w]) ? S.layout[w] : DEFAULTS.layout[w];
+      $(`.cell[data-slot="${slot}"]`).appendChild(widgetEl(w));
+      widgetEl(w).hidden = w in S.show && !S.show[w];
+    });
+    // keep a stable stacking order inside a slot
+    document.querySelectorAll('.cell').forEach((sl) => {
+      WIDGETS.forEach((w) => { const el = sl.querySelector(`.widget[data-w="${w}"]`); if (el) sl.appendChild(el); });
+    });
+    // a row with something in its centre keeps the centre truly centred
+    document.querySelectorAll('.row').forEach((row) => {
+      const filled = (c) => [...row.querySelector(`[data-col="${c}"]`).children].some((x) => !x.hidden);
+      row.classList.toggle('has-center', filled('center'));
+      row.classList.toggle('empty', !['left', 'center', 'right'].some(filled));
+    });
+    syncPickers();
+  }
+
+  function syncPickers() {
+    document.querySelectorAll('.pos-picker').forEach((pk) => {
+      const w = pk.dataset.w;
+      pk.querySelectorAll('button').forEach((b) => {
+        b.classList.toggle('active', b.dataset.slot === S.layout[w]);
+        const others = WIDGETS.filter((o) => o !== w && S.layout[o] === b.dataset.slot && !(o in S.show && !S.show[o]));
+        b.classList.toggle('taken', others.length > 0);
+        b.title = b.dataset.slot.replace('-', ' ') + (others.length ? ` (shared with ${others.join(', ')})` : '');
+      });
+    });
+  }
+  document.querySelectorAll('.pos-picker').forEach((pk) => {
+    pk.querySelectorAll('button').forEach((b) => {
+      b.onclick = () => { S.layout = { ...S.layout, [pk.dataset.w]: b.dataset.slot }; save(); placeWidgets(); };
+    });
+  });
+  $('#resetLayout').onclick = () => { S.layout = { ...DEFAULTS.layout }; S.show = { ...DEFAULTS.show }; save(); placeWidgets(); syncInputs(); };
+
+  /* ---------- edit layout on the page (drag widgets into slots) ---------- */
+  function setEditing(on) {
+    document.body.classList.toggle('editing', on);
+    $('#editBar').hidden = !on;
+    if (on) toggleSettings(false);
+  }
+  $('#editLayout').onclick = () => setEditing(true);
+  $('#editDone').onclick = () => setEditing(false);
+
+  WIDGETS.forEach((w) => {
+    const el = widgetEl(w);
+    el.addEventListener('pointerdown', (e) => {
+      if (!document.body.classList.contains('editing') || e.button !== 0) return;
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const ghost = el.cloneNode(true);
+      ghost.classList.add('ghost');
+      ghost.removeAttribute('data-w');
+      ghost.querySelectorAll('[id]').forEach((x) => x.removeAttribute('id'));
+      Object.assign(ghost.style, { width: r.width + 'px', left: r.left + 'px', top: r.top + 'px' });
+      document.body.appendChild(ghost);
+      el.classList.add('lifting');
+      const dx = e.clientX - r.left, dy = e.clientY - r.top;
+      let target = null;
+      const move = (ev) => {
+        ghost.style.left = ev.clientX - dx + 'px';
+        ghost.style.top = ev.clientY - dy + 'px';
+        const hit = document.elementsFromPoint(ev.clientX, ev.clientY).find((x) => x.classList && x.classList.contains('cell'));
+        if (hit !== target) {
+          if (target) target.classList.remove('over');
+          target = hit || null;
+          if (target) target.classList.add('over');
+        }
+      };
+      const up = () => {
+        removeEventListener('pointermove', move);
+        removeEventListener('pointerup', up);
+        ghost.remove();
+        el.classList.remove('lifting');
+        if (target) {
+          target.classList.remove('over');
+          S.layout = { ...S.layout, [w]: target.dataset.slot };
+          save(); placeWidgets();
+        }
+      };
+      addEventListener('pointermove', move);
+      addEventListener('pointerup', up);
+    });
+  });
 
   /* ================= Site icons (pulled from each bookmark's own website) ================= */
   let ICONS = {};
   let iconsSaveT;
   const saveIcons = () => { clearTimeout(iconsSaveT); iconsSaveT = setTimeout(() => store.set('icons', ICONS), 400); };
 
+  const ICON_V = 2;   // bump to re-resolve icons cached by an older, less careful picker
   function validIcon(rec) {
-    if (!rec) return false;
+    if (!rec || rec.v !== ICON_V) return false;
     const ttl = rec.data ? 14 * DAY : 2 * DAY;
     return Date.now() - rec.ts < ttl;
   }
@@ -430,6 +527,7 @@
     } catch {}
     if (origin) {
       cands.push({ href: origin + '/apple-touch-icon.png', score: 600 });
+      cands.push({ href: origin + '/apple-touch-icon-precomposed.png', score: 590 });
       cands.push({ href: origin + '/favicon.ico', score: 10 });
     }
     const seen = new Set();
@@ -456,11 +554,14 @@
       const im = host && await loadImg(`https://www.google.com/s2/favicons?domain=${host}&sz=128`);
       return im ? { data: im.src, full: false, w: im.naturalWidth } : null;
     }
+    // Take the sharpest icon found, not just the first that loads (stop early once one is big enough).
+    let best = null;
     for (const c of await iconCandidates(url)) {
       const r = await rasterize(c.href);
-      if (r) return r;
+      if (r && (!best || r.w > best.w)) best = r;
+      if (best && best.w >= 128) break;
     }
-    return chromeFavicon(url);
+    return best || chromeFavicon(url);
   }
 
   // small concurrency-limited queue
@@ -473,7 +574,7 @@
     pending[origin] = new Promise((resolve) => {
       queue.push(async () => {
         const r = await resolveIcon(url);
-        ICONS[origin] = r ? { ...r, ts: Date.now() } : { data: null, ts: Date.now() };
+        ICONS[origin] = r ? { ...r, ts: Date.now(), v: ICON_V } : { data: null, ts: Date.now(), v: ICON_V };
         saveIcons();
         delete pending[origin];
         resolve(r);
@@ -507,7 +608,10 @@
         const img = new Image();
         img.alt = ''; img.draggable = false; img.src = rec.data;
         if (rec.full) el.classList.add('full');
-        else if (rec.w < 48) el.classList.add('small');
+        else {
+          if (rec.w < 48) el.classList.add('small');
+          img.style.setProperty('--iw', (rec.w * 1.6 / (devicePixelRatio || 1)) + 'px');   // never stretch past ~1.6x: keeps small icons crisp
+        }
         el.appendChild(img);
       } else {
         paintLetter(el, node);
@@ -549,6 +653,19 @@
   }
   const isFolder = (n) => !n.url;
 
+  // Items shown on the page: the Bookmarks bar, with "unpacked" folders replaced by their contents.
+  let nodeMap = new Map();
+  async function barItems() {
+    const out = [];
+    for (const n of await children('1')) {
+      if (isFolder(n) && S.unpack.includes(n.id)) {
+        (await children(n.id)).forEach((k) => out.push({ ...k, _from: n.id }));
+      } else out.push(n);
+    }
+    nodeMap = new Map(out.map((n) => [n.id, n]));
+    return out;
+  }
+
   function ordered(nodes) {
     const idx = new Map(S.order.map((id, i) => [id, i]));
     return nodes
@@ -574,6 +691,7 @@
     el.dataset.id = node.id;
     el.style.setProperty('--d', Math.min(i * 40, 800) + 'ms');
     el.title = node.title || node.url || '';
+    el._node = node;
 
     const icon = document.createElement('div');
     icon.className = 'icon glass';
@@ -627,14 +745,17 @@
   }
 
   const secOf = (id) => {
+    const valid = (a) => a === 'hidden' || S.sections.some((x) => x.id === a);
     const a = S.assign[id];
-    if (a === 'hidden') return 'hidden';
-    return S.sections.some((x) => x.id === a) ? a : S.sections[0].id;
+    if (valid(a)) return a;
+    const n = nodeMap.get(id);
+    if (n && n._from && valid(S.assign[n._from])) return S.assign[n._from]; // inherits its folder's section
+    return S.sections[0].id;
   };
 
   async function renderGrid({ animate = true } = {}) {
     const wrap = $('#sections');
-    const all = ordered(await children('1'));
+    const all = ordered(await barItems());
     wrap.classList.toggle('static', !animate);
     wrap.innerHTML = '';
     if (!all.length) {
@@ -689,7 +810,7 @@
   async function placeDragged(secId, targetId, after) {
     const moving = dragId; // capture now: dragend clears dragId before this async work finishes
     if (!moving) return;
-    const ids = ordered(await children('1')).map((n) => n.id).filter((id) => id !== moving);
+    const ids = ordered(await barItems()).map((n) => n.id).filter((id) => id !== moving);
     if (targetId) {
       ids.splice(ids.indexOf(targetId) + (after ? 1 : 0), 0, moving);
     } else {
@@ -758,13 +879,48 @@
     if (push) stack.push(node);
     $('#modalTitle').textContent = node.title || 'Folder';
     $('#backBtn').hidden = stack.length < 2;
+    $('#unpackBtn').hidden = node.parentId !== '1' && !String(node.id).startsWith('d');
     const g = $('#modalGrid');
     g.innerHTML = '';
     const kids = await children(node.id);
     if (!kids.length) g.innerHTML = '<div class="empty">This folder is empty.</div>';
-    kids.forEach((k, i) => g.appendChild(makeTile(k, i)));
+    $('#modalHint').hidden = !kids.some((k) => k.url);
+    kids.forEach((k, i) => {
+      const t = makeTile(k, i);
+      if (k.url) {
+        const mv = document.createElement('span');
+        mv.className = 'tile-act'; mv.textContent = '↗'; mv.title = 'Move out of this folder to the Bookmarks bar';
+        mv.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); moveOut(k, node); });
+        t.appendChild(mv);
+      }
+      g.appendChild(t);
+    });
     open('#modal');
   }
+
+  // Really moves the bookmark in Chrome: from its folder onto the Bookmarks bar.
+  async function moveOut(bm, folder) {
+    if (isExt) {
+      await chrome.bookmarks.move(bm.id, { parentId: '1' });
+    } else {
+      const f = DEMO.find((b) => b.id === folder.id);
+      if (f) { f.children = f.children.filter((c) => c.id !== bm.id); DEMO.push({ ...bm }); }
+    }
+    if (folder.id !== '1') S.assign = { ...S.assign, [bm.id]: secOf(folder.id) === 'hidden' ? S.sections[0].id : secOf(folder.id) };
+    save();
+    toast(`Moved “${bm.title || hostOf(bm.url)}” to the Bookmarks bar`);
+    openFolder(folder, false);
+    renderGrid({ animate: false });
+  }
+
+  $('#unpackBtn').onclick = () => {
+    const f = stack[stack.length - 1];
+    if (!f) return;
+    if (!S.unpack.includes(f.id)) S.unpack = [...S.unpack, f.id];
+    save(); stack.length = 0; close('#modal');
+    renderGrid(); buildBmList();
+    toast(`“${f.title}” bookmarks now show on the home screen — undo in Settings`);
+  };
   function open(sel) { $(sel).classList.remove('hidden'); }
   function close(sel) { $(sel).classList.add('hidden'); }
   $('#closeModal').onclick = () => { stack.length = 0; close('#modal'); };
@@ -786,6 +942,7 @@
       tabs.appendChild(t);
     });
     markTabs();
+    $('#galleryGrid').style.minHeight = '';
     renderThumbs();
     open('#gallery');
   }
@@ -793,6 +950,11 @@
 
   async function renderThumbs(fresh = false) {
     const g = $('#galleryGrid');
+    // Keep the sheet at the size it already is (never taller than it can show), so loading or a smaller
+    // set doesn't shrink it and re-grow. Reset when the gallery is reopened.
+    const sh = g.closest('.sheet');
+    const fill = sh.clientHeight - (sh.scrollHeight - g.offsetHeight);
+    g.style.minHeight = Math.max(parseFloat(g.style.minHeight) || 0, Math.min(g.offsetHeight, fill)) + 'px';
     g.innerHTML = '<div class="status">Loading wallpapers…</div>';
     const cat = galleryCat;
     try {
@@ -815,7 +977,7 @@
           b.classList.add('current');
           S.cat = cat; S.rotate = 'never'; save();
           $('#setRotate').value = 'never';
-          buildDock();
+          buildThemes();
           if (await setWallpaperItem(it, cat)) toast('Wallpaper set — it will stay until you change it');
         };
         g.appendChild(b);
@@ -837,6 +999,31 @@
   }
   $('#settingsBtn').onclick = () => toggleSettings(!$('#settings').classList.contains('open'));
   $('#closeSettings').onclick = () => toggleSettings(false);
+  $('#settings').addEventListener('click', (e) => { if (e.target.id === 'settings') toggleSettings(false); });
+
+  // unblur the page behind Settings (remembered)
+  function setClearBg(on) {
+    $('#settings').classList.toggle('clear', on);
+    $('#clearBg').setAttribute('aria-pressed', String(on));
+    $('#clearBg span').textContent = on ? 'Blur background' : 'Unblur background';
+    try { localStorage.setItem('gh_clear', on ? '1' : ''); } catch {}
+  }
+  $('#clearBg').onclick = () => setClearBg(!$('#settings').classList.contains('clear'));
+  try { setClearBg(localStorage.getItem('gh_clear') === '1'); } catch { setClearBg(false); }
+
+  // sidebar tabs
+  let settingsTab = 'layout';
+  function showTab(tab) {
+    settingsTab = tab;
+    document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+    document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.dataset.tab === tab));
+    $('.content').scrollTop = 0;
+    try { localStorage.setItem('gh_tab', tab); } catch {}
+  }
+  document.querySelectorAll('.nav-item').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+
+  try { settingsTab = localStorage.getItem('gh_tab') || 'layout'; } catch {}
+  showTab(settingsTab);
 
   function buildSecList() {
     const list = $('#secList');
@@ -872,39 +1059,64 @@
     inputs[inputs.length - 1].select();
   };
 
+  function bmRow(n, { child = false } = {}) {
+    const row = document.createElement('div');
+    row.className = 'bm-item' + (child ? ' child' : '');
+    const ico = document.createElement('span');
+    ico.className = 'bm-ico';
+    if (isFolder(n)) {
+      ico.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+    } else {
+      const rec = ICONS[originOf(n.url)];
+      if (rec && rec.data) { const im = new Image(); im.src = rec.data; ico.appendChild(im); }
+      else ico.textContent = (n.title || hostOf(n.url)).charAt(0).toUpperCase();
+    }
+    const name = document.createElement('span');
+    name.className = 'bm-name';
+    name.textContent = n.title || hostOf(n.url) || 'Untitled';
+    row.append(ico, name);
+
+    if (isFolder(n) && !child) {
+      const unpacked = S.unpack.includes(n.id);
+      const b = document.createElement('button');
+      b.className = 'pill-btn' + (unpacked ? ' on' : '');
+      b.textContent = unpacked ? 'Unpacked' : 'Unpack';
+      b.title = unpacked ? 'Show as a folder tile again' : "Show this folder's bookmarks directly on the home screen";
+      b.onclick = () => {
+        S.unpack = unpacked ? S.unpack.filter((x) => x !== n.id) : [...S.unpack, n.id];
+        save(); buildBmList(); renderGrid({ animate: false });
+      };
+      row.appendChild(b);
+    }
+
+    const sel = document.createElement('select');
+    [...S.sections.map((x) => [x.id, x.name || 'Untitled']), ['hidden', 'Hidden']].forEach(([v, t]) => {
+      const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
+    });
+    sel.value = secOf(n.id);
+    row.classList.toggle('off', sel.value === 'hidden');
+    sel.onchange = () => {
+      S.assign = { ...S.assign, [n.id]: sel.value };
+      save(); renderGrid({ animate: false }); buildBmList();
+    };
+    row.appendChild(sel);
+    return row;
+  }
+
   async function buildBmList() {
     const list = $('#bmList');
-    const nodes = ordered(await children('1'));
-    list.innerHTML = nodes.length ? '' : '<div class="fine">No bookmarks on your Bookmarks bar yet.</div>';
-    nodes.forEach((n) => {
-      const row = document.createElement('div');
-      row.className = 'bm-item';
-      const ico = document.createElement('span');
-      ico.className = 'bm-ico';
-      if (isFolder(n)) {
-        ico.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-      } else {
-        const rec = ICONS[originOf(n.url)];
-        if (rec && rec.data) { const im = new Image(); im.src = rec.data; ico.appendChild(im); }
-        else ico.textContent = (n.title || hostOf(n.url)).charAt(0).toUpperCase();
+    const top = await children('1');
+    await barItems();
+    const pos = new Map(S.order.map((id, k) => [id, k]));
+    const key = (n) => (pos.has(n.id) ? pos.get(n.id) : 1e6);
+    const sorted = [...top].sort((a, b) => key(a) - key(b));
+    list.innerHTML = top.length ? '' : '<div class="fine">No bookmarks on your Bookmarks bar yet.</div>';
+    for (const n of sorted) {
+      list.appendChild(bmRow(n));
+      if (isFolder(n) && S.unpack.includes(n.id)) {
+        ordered(await children(n.id)).forEach((k) => list.appendChild(bmRow(k, { child: true })));
       }
-      const name = document.createElement('span');
-      name.className = 'bm-name';
-      name.textContent = n.title || hostOf(n.url) || 'Untitled';
-      const sel = document.createElement('select');
-      [...S.sections.map((x) => [x.id, x.name || 'Untitled']), ['hidden', 'Hidden']].forEach(([v, t]) => {
-        const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o);
-      });
-      sel.value = secOf(n.id);
-      row.classList.toggle('off', sel.value === 'hidden');
-      sel.onchange = () => {
-        S.assign = { ...S.assign, [n.id]: sel.value };
-        row.classList.toggle('off', sel.value === 'hidden');
-        save(); renderGrid({ animate: false });
-      };
-      row.append(ico, name, sel);
-      list.appendChild(row);
-    });
+    }
   }
 
   function syncInputs() {
@@ -915,6 +1127,14 @@
     $('#setDim').value = S.dim; $('#outDim').textContent = S.dim + '%';
     $('#setTile').value = S.tile; $('#outTile').textContent = S.tile + 'px';
     $('#setLabels').checked = S.labels;
+    $('#setCols').value = S.cols; $('#outCols').textContent = S.cols;
+    $('#setPanel').checked = !!S.panel;
+    document.querySelectorAll('#setAlign button').forEach((b) => b.classList.toggle('active', b.dataset.v === (S.align || 'auto')));
+    $('#setDate').checked = !!S.showDate;
+    $('#setClockSize').value = S.clockSize; $('#outClockSize').textContent = S.clockSize + 'px';
+    $('#showClock').checked = S.show.clock !== false;
+    $('#showCredit').checked = S.show.credit !== false;
+    syncPickers();
     store.get('customImage').then((c) => { $('#removeCustom').hidden = !c; });
   }
 
@@ -925,6 +1145,15 @@
   $('#setDim').oninput = (e) => { S.dim = +e.target.value; $('#outDim').textContent = S.dim + '%'; applyVars(); save(); };
   $('#setTile').oninput = (e) => { S.tile = +e.target.value; $('#outTile').textContent = S.tile + 'px'; applyVars(); save(); };
   $('#setLabels').onchange = (e) => { S.labels = e.target.checked; applyVars(); save(); };
+  $('#setCols').oninput = (e) => { S.cols = +e.target.value; $('#outCols').textContent = S.cols; applyVars(); save(); };
+  $('#setPanel').onchange = (e) => { S.panel = e.target.checked; applyVars(); save(); };
+  document.querySelectorAll('#setAlign button').forEach((b) => {
+    b.onclick = () => { S.align = b.dataset.v; applyVars(); save(); syncInputs(); };
+  });
+  $('#setDate').onchange = (e) => { S.showDate = e.target.checked; applyVars(); save(); };
+  $('#setClockSize').oninput = (e) => { S.clockSize = +e.target.value; $('#outClockSize').textContent = S.clockSize + 'px'; applyVars(); save(); };
+  $('#showClock').onchange = (e) => { S.show = { ...S.show, clock: e.target.checked }; save(); placeWidgets(); };
+  $('#showCredit').onchange = (e) => { S.show = { ...S.show, credit: e.target.checked }; save(); placeWidgets(); };
 
   $('#refreshIcons').onclick = async () => { ICONS = {}; await store.del('icons'); renderGrid(); toast('Fetching fresh icons…'); };
   $('#resetOrder').onclick = () => { S.order = []; save(); renderGrid(); buildBmList(); };
@@ -945,7 +1174,7 @@
       }
       await store.set('customImage', data);
       S.cat = 'custom'; save();
-      buildDock(); syncInputs();
+      buildThemes(); syncInputs();
       showWallpaper(data, null);
     };
     reader.readAsDataURL(f);
@@ -953,23 +1182,145 @@
   $('#removeCustom').onclick = async () => {
     await store.del('customImage');
     if (S.cat === 'custom') S.cat = 'space';
-    save(); buildDock(); syncInputs(); changeWallpaper();
+    save(); buildThemes(); syncInputs(); changeWallpaper();
   };
 
   $('#resetBtn').onclick = async () => {
     S = { ...DEFAULTS }; await store.set('settings', S);
-    applyVars(); tick(); syncInputs(); buildDock(); renderGrid(); buildSecList(); buildBmList();
+    applyVars(); tick(); syncInputs(); buildThemes(); renderGrid(); buildSecList(); buildBmList();
+  };
+
+  /* ================= Right-click menu on a bookmark ================= */
+  const ctx = $('#ctx');
+  function hideCtx() { ctx.hidden = true; ctx.innerHTML = ''; }
+
+  // Updates bookmarks in Chrome (or the sample data in preview mode)
+  const bm = {
+    async update(n, changes) {
+      if (isExt) return chrome.bookmarks.update(n.id, changes);
+      const find = (list) => { for (const x of list) { if (x.id === n.id) return x; if (x.children) { const f = find(x.children); if (f) return f; } } };
+      Object.assign(find(DEMO) || {}, changes);
+    },
+    async remove(n) {
+      if (isExt) return isFolder(n) ? chrome.bookmarks.removeTree(n.id) : chrome.bookmarks.remove(n.id);
+      const drop = (list) => { const k = list.findIndex((x) => x.id === n.id); if (k >= 0) return list.splice(k, 1); list.forEach((x) => x.children && drop(x.children)); };
+      drop(DEMO);
+    }
+  };
+  async function afterBookmarkChange() {
+    await renderGrid({ animate: false });
+    buildBmList();
+    const f = stack[stack.length - 1];
+    if (f && !$('#modal').classList.contains('hidden')) openFolder(f, false);
+  }
+
+  function showCtx(n, x, y, inFolder) {
+    const folder = isFolder(n);
+    const sec = secOf(n.id);
+    const items = [];
+    if (!folder) {
+      items.push({ label: 'Open in new tab', icon: '↗', run: () => window.open(n.url, '_blank', 'noopener') });
+    } else {
+      items.push({ label: 'Open folder', icon: '▢', run: () => openFolder(n) });
+    }
+    items.push({ label: folder ? 'Rename folder…' : 'Edit name & URL…', icon: '✎', run: () => openEdit(n) });
+    if (!inFolder && S.sections.length > 1) {
+      items.push({ sep: true });
+      S.sections.forEach((s) => items.push({
+        label: `Move to ${s.name || 'Untitled'}`, icon: s.id === sec ? '●' : '○', disabled: s.id === sec,
+        run: () => { S.assign = { ...S.assign, [n.id]: s.id }; save(); afterBookmarkChange(); }
+      }));
+    }
+    if (!inFolder) items.push({ label: 'Hide from home screen', icon: '⊘', run: () => { S.assign = { ...S.assign, [n.id]: 'hidden' }; save(); afterBookmarkChange(); toast('Hidden — show it again in Settings → Sections & folders'); } });
+    if (!folder) items.push({ label: 'Refresh icon', icon: '↻', run: () => { delete ICONS[originOf(n.url)]; saveIcons(); afterBookmarkChange(); } });
+    items.push({ sep: true });
+    items.push({ label: folder ? 'Delete folder…' : 'Delete bookmark…', icon: '🗑', danger: true, confirm: true, run: async () => {
+      await bm.remove(n); toast(`Deleted “${n.title || hostOf(n.url)}”`); afterBookmarkChange();
+    } });
+
+    ctx.innerHTML = '';
+    const head = document.createElement('div');
+    head.className = 'ctx-head';
+    head.textContent = n.title || hostOf(n.url) || 'Bookmark';
+    ctx.appendChild(head);
+    items.forEach((it) => {
+      if (it.sep) { const s = document.createElement('div'); s.className = 'ctx-sep'; ctx.appendChild(s); return; }
+      const b = document.createElement('button');
+      b.className = 'ctx-item' + (it.danger ? ' danger' : '');
+      b.disabled = !!it.disabled;
+      b.innerHTML = `<span class="ci"></span><span class="cl"></span>`;
+      b.querySelector('.ci').textContent = it.icon;
+      b.querySelector('.cl').textContent = it.label;
+      b.onclick = (e) => {
+        e.stopPropagation();
+        if (it.confirm && !b.classList.contains('armed')) {        // in-page confirm: click twice to delete
+          b.classList.add('armed');
+          b.querySelector('.cl').textContent = isFolder(n) ? 'Click again to delete folder + contents' : 'Click again to delete';
+          return;
+        }
+        hideCtx(); it.run();
+      };
+      ctx.appendChild(b);
+    });
+    ctx.hidden = false;
+    const r = ctx.getBoundingClientRect();
+    ctx.style.left = Math.min(x, innerWidth - r.width - 10) + 'px';
+    ctx.style.top = Math.min(y, innerHeight - r.height - 10) + 'px';
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    const tile = e.target.closest('.tile');
+    if (!tile || !tile._node || document.body.classList.contains('editing')) { hideCtx(); return; }
+    e.preventDefault();
+    showCtx(tile._node, e.clientX, e.clientY, !!tile.closest('#modalGrid'));
+  });
+  document.addEventListener('pointerdown', (e) => { if (!ctx.hidden && !ctx.contains(e.target)) hideCtx(); });
+  addEventListener('blur', hideCtx);
+  $('#stage').addEventListener('scroll', hideCtx);
+
+  /* ---------- edit dialog ---------- */
+  let editing = null;
+  function openEdit(n) {
+    editing = n;
+    const folder = isFolder(n);
+    $('#editTitle').textContent = folder ? 'Rename folder' : 'Edit bookmark';
+    $('#editName').value = n.title || '';
+    $('#editUrl').value = n.url || '';
+    $('#editUrlRow').hidden = folder;
+    $('#editErr').hidden = true;
+    open('#editDlg');
+    setTimeout(() => $('#editName').select(), 60);
+  }
+  $('#editCancel').onclick = () => close('#editDlg');
+  $('#editDlg').addEventListener('click', (e) => { if (e.target.id === 'editDlg') close('#editDlg'); });
+  $('#editForm').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!editing) return;
+    const changes = { title: $('#editName').value.trim() };
+    if (!isFolder(editing)) {
+      let u = $('#editUrl').value.trim();
+      if (u && !/^[a-z][\w+.-]*:/i.test(u)) u = 'https://' + u;
+      try { new URL(u); } catch { $('#editErr').textContent = 'That URL doesn’t look right.'; $('#editErr').hidden = false; return; }
+      changes.url = u;
+    }
+    try { await bm.update(editing, changes); }
+    catch (err) { $('#editErr').textContent = 'Couldn’t save: ' + (err.message || err); $('#editErr').hidden = false; return; }
+    close('#editDlg');
+    toast('Bookmark updated');
+    afterBookmarkChange();
   };
 
   /* ================= Global interactions ================= */
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (!$('#gallery').classList.contains('hidden')) close('#gallery');
+    if (!$('#ctx').hidden) hideCtx();
+    else if (!$('#editDlg').classList.contains('hidden')) close('#editDlg');
+    else if (document.body.classList.contains('editing')) setEditing(false);
+    else if (!$('#gallery').classList.contains('hidden')) close('#gallery');
     else if (!$('#modal').classList.contains('hidden')) { stack.length = 0; close('#modal'); }
     else toggleSettings(false);
   });
 
-  addEventListener('resize', () => movePill());
 
   if (isExt) {
     let t;
@@ -988,6 +1339,9 @@
     }
     S.v = 3;
     if (!Array.isArray(S.sections) || !S.sections.length) S.sections = [...DEFAULTS.sections];
+    S.layout = { ...DEFAULTS.layout, ...(S.layout || {}) };
+    S.show = { ...DEFAULTS.show, ...(S.show || {}) };
+    if (!Array.isArray(S.unpack)) S.unpack = [];
     if (!saved || !saved.v) save();
     if (!isExt) {
       const b = document.createElement('div');
@@ -997,10 +1351,12 @@
     }
     ICONS = icons || {};
     applyVars();
+    placeWidgets();
+    $('#widgets').remove();
     tick();
     setInterval(tick, 1000);
     syncInputs();
-    buildDock();
+    buildThemes();
     renderGrid();
     bootWallpaper();
   })();

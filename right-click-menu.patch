@@ -1,0 +1,216 @@
+diff -ru a/css/style.css b/css/style.css
+--- a/css/style.css	2026-10-07 17:47:00.091172092 +0000
++++ b/css/style.css	2026-10-07 17:47:00.100174226 +0000
+@@ -648,3 +648,39 @@
+ .settings-overlay.peek { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; transition: background .25s, backdrop-filter .25s, opacity .3s; }
+ .settings-overlay.peek .settings-win { opacity: .14; transform: scale(.985); transition: opacity .25s ease, transform .4s var(--ease); }
+ .settings-overlay.peek .settings-win:hover { opacity: .14; }
++
++/* ============ Right-click menu ============ */
++.ctx {
++  position: fixed; z-index: 70; min-width: 230px; max-width: 300px;
++  padding: 6px; border-radius: 16px;
++  background: rgba(28, 28, 38, .72);
++  backdrop-filter: blur(30px) saturate(170%); -webkit-backdrop-filter: blur(30px) saturate(170%);
++  box-shadow: 0 18px 50px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .2);
++  animation: ctxIn .18s var(--ease) both; transform-origin: top left;
++  user-select: none;
++}
++.ctx[hidden] { display: none; }
++.ctx-head { padding: 8px 12px 6px; font-size: 12px; font-weight: 600; opacity: .55; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++.ctx-item {
++  display: flex; align-items: center; gap: 10px; width: 100%;
++  padding: 9px 12px; border: 0; border-radius: 10px; background: transparent; cursor: pointer;
++  font-size: 13.5px; text-align: left; color: #fff;
++}
++.ctx-item .ci { width: 18px; text-align: center; opacity: .8; flex: none; }
++.ctx-item:hover:not(:disabled) { background: rgba(255, 255, 255, .14); }
++.ctx-item:disabled { opacity: .45; cursor: default; }
++.ctx-item.danger { color: #ff8a80; }
++.ctx-item.danger.armed { background: #ff453a; color: #fff; }
++.ctx-sep { height: 1px; margin: 5px 8px; background: rgba(255, 255, 255, .12); }
++@keyframes ctxIn { from { opacity: 0; transform: scale(.94); } }
++
++/* ============ Edit dialog ============ */
++#editDlg { z-index: 60; }
++.edit-sheet { width: min(460px, 92vw); padding: 24px 26px 22px; border-radius: 28px; background: rgba(28, 28, 38, .6); }
++.edit-sheet .sheet-head { margin-bottom: 16px; }
++.edit-field { display: flex; flex-direction: column; gap: 7px; margin-bottom: 14px; font-size: 12.5px; font-weight: 600; letter-spacing: .04em; opacity: .95; }
++.edit-field > span { opacity: .65; text-transform: uppercase; }
++.edit-field input[type=text] { width: 100%; padding: 11px 14px; font-size: 14.5px; font-weight: 400; letter-spacing: 0; }
++.edit-actions { display: flex; gap: 10px; margin-top: 6px; }
++.edit-actions .btn { flex: 1; }
++.fine.err { color: #ff8a80; opacity: 1; margin: -4px 0 8px; }
+diff -ru a/js/main.js b/js/main.js
+--- a/js/main.js	2026-10-07 17:47:00.094449969 +0000
++++ b/js/main.js	2026-10-07 17:47:00.102685556 +0000
+@@ -683,6 +683,7 @@
+     el.dataset.id = node.id;
+     el.style.setProperty('--d', Math.min(i * 40, 800) + 'ms');
+     el.title = node.title || node.url || '';
++    el._node = node;
+ 
+     const icon = document.createElement('div');
+     icon.className = 'icon glass';
+@@ -1182,10 +1183,132 @@
+     applyVars(); tick(); syncInputs(); buildThemes(); renderGrid(); buildSecList(); buildBmList();
+   };
+ 
++  /* ================= Right-click menu on a bookmark ================= */
++  const ctx = $('#ctx');
++  function hideCtx() { ctx.hidden = true; ctx.innerHTML = ''; }
++
++  // Updates bookmarks in Chrome (or the sample data in preview mode)
++  const bm = {
++    async update(n, changes) {
++      if (isExt) return chrome.bookmarks.update(n.id, changes);
++      const find = (list) => { for (const x of list) { if (x.id === n.id) return x; if (x.children) { const f = find(x.children); if (f) return f; } } };
++      Object.assign(find(DEMO) || {}, changes);
++    },
++    async remove(n) {
++      if (isExt) return isFolder(n) ? chrome.bookmarks.removeTree(n.id) : chrome.bookmarks.remove(n.id);
++      const drop = (list) => { const k = list.findIndex((x) => x.id === n.id); if (k >= 0) return list.splice(k, 1); list.forEach((x) => x.children && drop(x.children)); };
++      drop(DEMO);
++    }
++  };
++  async function afterBookmarkChange() {
++    await renderGrid({ animate: false });
++    buildBmList();
++    const f = stack[stack.length - 1];
++    if (f && !$('#modal').classList.contains('hidden')) openFolder(f, false);
++  }
++
++  function showCtx(n, x, y, inFolder) {
++    const folder = isFolder(n);
++    const sec = secOf(n.id);
++    const items = [];
++    if (!folder) {
++      items.push({ label: 'Open in new tab', icon: '↗', run: () => window.open(n.url, '_blank', 'noopener') });
++    } else {
++      items.push({ label: 'Open folder', icon: '▢', run: () => openFolder(n) });
++    }
++    items.push({ label: folder ? 'Rename folder…' : 'Edit name & URL…', icon: '✎', run: () => openEdit(n) });
++    if (!inFolder && S.sections.length > 1) {
++      items.push({ sep: true });
++      S.sections.forEach((s) => items.push({
++        label: `Move to ${s.name || 'Untitled'}`, icon: s.id === sec ? '●' : '○', disabled: s.id === sec,
++        run: () => { S.assign = { ...S.assign, [n.id]: s.id }; save(); afterBookmarkChange(); }
++      }));
++    }
++    if (!inFolder) items.push({ label: 'Hide from home screen', icon: '⊘', run: () => { S.assign = { ...S.assign, [n.id]: 'hidden' }; save(); afterBookmarkChange(); toast('Hidden — show it again in Settings → Sections & folders'); } });
++    if (!folder) items.push({ label: 'Refresh icon', icon: '↻', run: () => { delete ICONS[originOf(n.url)]; saveIcons(); afterBookmarkChange(); } });
++    items.push({ sep: true });
++    items.push({ label: folder ? 'Delete folder…' : 'Delete bookmark…', icon: '🗑', danger: true, confirm: true, run: async () => {
++      await bm.remove(n); toast(`Deleted “${n.title || hostOf(n.url)}”`); afterBookmarkChange();
++    } });
++
++    ctx.innerHTML = '';
++    const head = document.createElement('div');
++    head.className = 'ctx-head';
++    head.textContent = n.title || hostOf(n.url) || 'Bookmark';
++    ctx.appendChild(head);
++    items.forEach((it) => {
++      if (it.sep) { const s = document.createElement('div'); s.className = 'ctx-sep'; ctx.appendChild(s); return; }
++      const b = document.createElement('button');
++      b.className = 'ctx-item' + (it.danger ? ' danger' : '');
++      b.disabled = !!it.disabled;
++      b.innerHTML = `<span class="ci"></span><span class="cl"></span>`;
++      b.querySelector('.ci').textContent = it.icon;
++      b.querySelector('.cl').textContent = it.label;
++      b.onclick = (e) => {
++        e.stopPropagation();
++        if (it.confirm && !b.classList.contains('armed')) {        // in-page confirm: click twice to delete
++          b.classList.add('armed');
++          b.querySelector('.cl').textContent = isFolder(n) ? 'Click again to delete folder + contents' : 'Click again to delete';
++          return;
++        }
++        hideCtx(); it.run();
++      };
++      ctx.appendChild(b);
++    });
++    ctx.hidden = false;
++    const r = ctx.getBoundingClientRect();
++    ctx.style.left = Math.min(x, innerWidth - r.width - 10) + 'px';
++    ctx.style.top = Math.min(y, innerHeight - r.height - 10) + 'px';
++  }
++
++  document.addEventListener('contextmenu', (e) => {
++    const tile = e.target.closest('.tile');
++    if (!tile || !tile._node || document.body.classList.contains('editing')) { hideCtx(); return; }
++    e.preventDefault();
++    showCtx(tile._node, e.clientX, e.clientY, !!tile.closest('#modalGrid'));
++  });
++  document.addEventListener('pointerdown', (e) => { if (!ctx.hidden && !ctx.contains(e.target)) hideCtx(); });
++  addEventListener('blur', hideCtx);
++  $('#stage').addEventListener('scroll', hideCtx);
++
++  /* ---------- edit dialog ---------- */
++  let editing = null;
++  function openEdit(n) {
++    editing = n;
++    const folder = isFolder(n);
++    $('#editTitle').textContent = folder ? 'Rename folder' : 'Edit bookmark';
++    $('#editName').value = n.title || '';
++    $('#editUrl').value = n.url || '';
++    $('#editUrlRow').hidden = folder;
++    $('#editErr').hidden = true;
++    open('#editDlg');
++    setTimeout(() => $('#editName').select(), 60);
++  }
++  $('#editCancel').onclick = () => close('#editDlg');
++  $('#editDlg').addEventListener('click', (e) => { if (e.target.id === 'editDlg') close('#editDlg'); });
++  $('#editForm').onsubmit = async (e) => {
++    e.preventDefault();
++    if (!editing) return;
++    const changes = { title: $('#editName').value.trim() };
++    if (!isFolder(editing)) {
++      let u = $('#editUrl').value.trim();
++      if (u && !/^[a-z][\w+.-]*:/i.test(u)) u = 'https://' + u;
++      try { new URL(u); } catch { $('#editErr').textContent = 'That URL doesn’t look right.'; $('#editErr').hidden = false; return; }
++      changes.url = u;
++    }
++    try { await bm.update(editing, changes); }
++    catch (err) { $('#editErr').textContent = 'Couldn’t save: ' + (err.message || err); $('#editErr').hidden = false; return; }
++    close('#editDlg');
++    toast('Bookmark updated');
++    afterBookmarkChange();
++  };
++
+   /* ================= Global interactions ================= */
+   document.addEventListener('keydown', (e) => {
+     if (e.key !== 'Escape') return;
+-    if (document.body.classList.contains('editing')) setEditing(false);
++    if (!$('#ctx').hidden) hideCtx();
++    else if (!$('#editDlg').classList.contains('hidden')) close('#editDlg');
++    else if (document.body.classList.contains('editing')) setEditing(false);
+     else if (!$('#gallery').classList.contains('hidden')) close('#gallery');
+     else if (!$('#modal').classList.contains('hidden')) { stack.length = 0; close('#modal'); }
+     else toggleSettings(false);
+diff -ru a/newtab.html b/newtab.html
+--- a/newtab.html	2026-10-07 17:47:00.086028085 +0000
++++ b/newtab.html	2026-10-07 17:47:00.097408538 +0000
+@@ -81,6 +81,24 @@
+     </div>
+   </div>
+ 
++  <!-- Right-click menu for a bookmark -->
++  <div id="ctx" class="ctx glass" role="menu" hidden></div>
++
++  <!-- Edit bookmark dialog -->
++  <div id="editDlg" class="overlay hidden">
++    <form id="editForm" class="sheet glass edit-sheet" autocomplete="off">
++      <div class="sheet-head"><h2 id="editTitle">Edit bookmark</h2></div>
++      <label class="edit-field"><span>Name</span><input id="editName" type="text" required></label>
++      <label class="edit-field" id="editUrlRow"><span>URL</span><input id="editUrl" type="text" spellcheck="false"></label>
++      <p id="editErr" class="fine err" hidden></p>
++      <div class="edit-actions">
++        <button type="button" id="editCancel" class="btn ghost">Cancel</button>
++        <button type="submit" class="btn solid">Save</button>
++      </div>
++      <p class="fine">Changes are saved to your Chrome bookmarks.</p>
++    </form>
++  </div>
++
+   <!-- Wallpaper gallery -->
+   <div id="gallery" class="overlay hidden">
+     <div class="sheet glass wide">
