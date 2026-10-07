@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Glass Home",
+  "description": "A modern frosted-glass new tab: your Bookmarks bar as app icons over beautiful free wallpapers.",
+  "version": "2.0.0",
+  "chrome_url_overrides": { "newtab": "newtab.html" },
+  "permissions": ["bookmarks", "storage", "unlimitedStorage", "favicon"],
+  "host_permissions": ["<all_urls>"],
+  "icons": {
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
+  }
+}
