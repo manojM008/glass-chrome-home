@@ -23,6 +23,7 @@
     showDate: true,
     layout: { bookmarks: 'middle-center', clock: 'top-left', credit: 'bottom-left', settings: 'bottom-right' },
     show: { clock: true, credit: true },
+    source: 'auto',      // where bookmarks come from: auto | a Chrome bookmark folder id
     unpack: [],          // folder ids whose bookmarks show directly on the page
     sections: [{ id: 'main', name: 'Bookmarks' }],
     assign: {},          // bookmark id -> section id | 'hidden'
@@ -46,7 +47,10 @@
     }
   };
   let saveT;
-  const save = () => { clearTimeout(saveT); saveT = setTimeout(() => store.set('settings', S), 150); };
+  const save = () => {
+    clearTimeout(saveT);
+    saveT = setTimeout(() => { store.set('settings', S); persistProfiles(); scheduleSync(); }, 150);
+  };
 
   function applyVars() {
     const r = document.documentElement.style;
@@ -643,6 +647,23 @@
     { id: 'd9', title: 'ChatGPT', url: 'https://chatgpt.com' },
     { id: 'd10', title: 'Netflix', url: 'https://www.netflix.com' }
   ];
+  // Chrome's bookmarks bar is usually id '1', but not always (account-synced bookmarks, other Chromium browsers).
+  let SRC = '1';
+  async function bookmarkTree() {
+    if (!isExt) return [{ id: '0', children: [{ id: '1', title: 'Bookmarks bar', children: DEMO }, { id: '2', title: 'Other bookmarks', children: [] }] }];
+    try { return await chrome.bookmarks.getTree(); } catch { return []; }
+  }
+  const countLinks = (n) => (n.url ? 1 : (n.children || []).reduce((a, k) => a + countLinks(k), 0));
+  async function resolveSource() {
+    const roots = ((await bookmarkTree())[0] || {}).children || [];
+    const find = (list, id) => { for (const n of list) { if (n.id === id) return n; const f = !n.url && find(n.children || [], id); if (f) return f; } return null; };
+    if (S.source && S.source !== 'auto' && find(roots, S.source)) { SRC = S.source; return SRC; }
+    const bar = (n) => n.folderType === 'bookmarks-bar' || n.id === '1';
+    const hasItems = (n) => (n.children || []).length > 0;
+    const pick = roots.find((n) => bar(n) && hasItems(n)) || roots.find(hasItems) || roots.find(bar) || roots[0];
+    SRC = pick ? pick.id : '1';
+    return SRC;
+  }
   async function children(id) {
     if (!isExt) {
       if (id === '1') return DEMO;
@@ -657,7 +678,8 @@
   let nodeMap = new Map();
   async function barItems() {
     const out = [];
-    for (const n of await children('1')) {
+    await resolveSource();
+    for (const n of await children(SRC)) {
       if (isFolder(n) && S.unpack.includes(n.id)) {
         (await children(n.id)).forEach((k) => out.push({ ...k, _from: n.id }));
       } else out.push(n);
@@ -759,7 +781,8 @@
     wrap.classList.toggle('static', !animate);
     wrap.innerHTML = '';
     if (!all.length) {
-      wrap.innerHTML = '<div class="empty glass">Your Bookmarks bar is empty.<br>Press <b>Ctrl + D</b> on any site and save it to the <b>Bookmarks bar</b>.</div>';
+      wrap.innerHTML = '<div class="empty glass">No bookmarks found in this folder.<br>Press <b>Ctrl + D</b> on any site to save it, or pick another folder to import from.<br><button class="btn ghost small" id="pickSource" style="margin-top:12px">Choose bookmarks source…</button></div>';
+      $('#pickSource').onclick = () => { toggleSettings(true); showTab('sections'); };
       return;
     }
     if (all.every((n) => secOf(n.id) === 'hidden')) {
@@ -879,7 +902,7 @@
     if (push) stack.push(node);
     $('#modalTitle').textContent = node.title || 'Folder';
     $('#backBtn').hidden = stack.length < 2;
-    $('#unpackBtn').hidden = node.parentId !== '1' && !String(node.id).startsWith('d');
+    $('#unpackBtn').hidden = node.parentId !== SRC && !String(node.id).startsWith('d');
     const g = $('#modalGrid');
     g.innerHTML = '';
     const kids = await children(node.id);
@@ -901,12 +924,12 @@
   // Really moves the bookmark in Chrome: from its folder onto the Bookmarks bar.
   async function moveOut(bm, folder) {
     if (isExt) {
-      await chrome.bookmarks.move(bm.id, { parentId: '1' });
+      await chrome.bookmarks.move(bm.id, { parentId: SRC });
     } else {
       const f = DEMO.find((b) => b.id === folder.id);
       if (f) { f.children = f.children.filter((c) => c.id !== bm.id); DEMO.push({ ...bm }); }
     }
-    if (folder.id !== '1') S.assign = { ...S.assign, [bm.id]: secOf(folder.id) === 'hidden' ? S.sections[0].id : secOf(folder.id) };
+    if (folder.id !== SRC) S.assign = { ...S.assign, [bm.id]: secOf(folder.id) === 'hidden' ? S.sections[0].id : secOf(folder.id) };
     save();
     toast(`Moved “${bm.title || hostOf(bm.url)}” to the Bookmarks bar`);
     openFolder(folder, false);
@@ -995,7 +1018,7 @@
     const p = $('#settings');
     p.classList.toggle('open', openIt);
     p.setAttribute('aria-hidden', String(!openIt));
-    if (openIt) { buildSecList(); buildBmList(); }
+    if (openIt) { buildSourceList(); buildSecList(); buildBmList(); refreshAccount(); }
   }
   $('#settingsBtn').onclick = () => toggleSettings(!$('#settings').classList.contains('open'));
   $('#closeSettings').onclick = () => toggleSettings(false);
@@ -1103,14 +1126,35 @@
     return row;
   }
 
+  async function buildSourceList() {
+    const sel = $('#setSource');
+    const roots = ((await bookmarkTree())[0] || {}).children || [];
+    sel.innerHTML = '';
+    const add = (value, label) => { const o = document.createElement('option'); o.value = value; o.textContent = label; sel.appendChild(o); };
+    add('auto', 'Auto-detect (recommended)');
+    const walk = (n, trail) => {
+      if (n.url) return;
+      const name = [...trail, n.title || 'Folder'];
+      const links = countLinks(n);
+      if (links || !n.parentId || trail.length === 0) add(n.id, name.join(' › ') + ` (${links})`);
+      (n.children || []).forEach((k) => walk(k, name));
+    };
+    roots.forEach((r) => walk(r, []));
+    sel.value = [...sel.options].some((o) => o.value === S.source) ? S.source : 'auto';
+    $('#sourceNote').textContent = 'Showing: ' + (await (async () => { await resolveSource(); const f = [...sel.options].find((o) => o.value === SRC); return f ? f.textContent : 'folder ' + SRC; })());
+  }
+  const applySource = () => { buildSourceList(); renderGrid(); buildBmList(); };
+  $('#setSource').onchange = (e) => { S.source = e.target.value; save(); applySource(); toast('Bookmarks source updated'); };
+  $('#rescanSource').onclick = () => { applySource(); toast('Rescanned your bookmarks'); };
+
   async function buildBmList() {
     const list = $('#bmList');
-    const top = await children('1');
     await barItems();
+    const top = await children(SRC);
     const pos = new Map(S.order.map((id, k) => [id, k]));
     const key = (n) => (pos.has(n.id) ? pos.get(n.id) : 1e6);
     const sorted = [...top].sort((a, b) => key(a) - key(b));
-    list.innerHTML = top.length ? '' : '<div class="fine">No bookmarks on your Bookmarks bar yet.</div>';
+    list.innerHTML = top.length ? '' : '<div class="fine">This folder has no bookmarks. Choose another source above.</div>';
     for (const n of sorted) {
       list.appendChild(bmRow(n));
       if (isFolder(n) && S.unpack.includes(n.id)) {
@@ -1186,8 +1230,9 @@
   };
 
   $('#resetBtn').onclick = async () => {
-    S = { ...DEFAULTS }; await store.set('settings', S);
-    applyVars(); tick(); syncInputs(); buildThemes(); renderGrid(); buildSecList(); buildBmList();
+    const prev = S.cat;                       // resets this profile's look; sections and order are shared, so they stay
+    applyBlob(pick(DEFAULTS, PROFILE_KEYS)); save();
+    refreshAll(prev);
   };
 
   /* ================= Right-click menu on a bookmark ================= */
@@ -1324,9 +1369,323 @@
 
   if (isExt) {
     let t;
-    const refresh = () => { clearTimeout(t); t = setTimeout(() => { renderGrid({ animate: false }); buildBmList(); }, 250); };
+    const refresh = () => { clearTimeout(t); t = setTimeout(async () => { if (await remapExtras()) save(); renderGrid({ animate: false }); buildBmList(); }, 250); };
     ['onCreated', 'onRemoved', 'onChanged', 'onMoved', 'onChildrenReordered'].forEach((ev) => chrome.bookmarks[ev].addListener(refresh));
   }
+
+  /* ================= Profiles & cloud sync ================= */
+  // A profile holds the look of the page (tile size, layout, clock…), so a small laptop and a big monitor can differ.
+  // Each device remembers which profile it uses. Sections, order and unpacked folders are shared by every profile;
+  // they are saved by bookmark URL because bookmark ids differ between devices.
+  // Everything syncs through chrome.storage.sync (your Google account) when Chrome Sync is on.
+  const PROFILE_KEYS = ['font', 'clock24', 'cat', 'rotate', 'blur', 'dim', 'tile', 'cols', 'align', 'panel', 'labels', 'clockSize', 'showDate', 'layout', 'show'];
+  const clone = (o) => JSON.parse(JSON.stringify(o));
+  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => k in o).map((k) => [k, o[k]]));
+  const hash = (str) => {
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for (let i = 0; i < str.length; i++) { const c = str.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); }
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+  };
+
+  // In preview mode (no extension) a localStorage shim stands in for chrome.storage.sync.
+  const syncArea = (isExt && chrome.storage.sync) || {
+    async get() { const o = {}; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k.startsWith('sync:')) o[k.slice(5)] = JSON.parse(localStorage.getItem(k)); } return o; },
+    async set(o) { for (const k in o) localStorage.setItem('sync:' + k, JSON.stringify(o[k])); },
+    async remove(ks) { [].concat(ks).forEach((k) => localStorage.removeItem('sync:' + k)); }
+  };
+
+  let PROFILES = [{ id: 'default', name: 'Default' }];   // synced list
+  let ACTIVE = 'default';                               // this device's profile (local only)
+  let PBLOBS = {};                                      // profile id -> its settings
+  let EXTRA = { assign: {}, order: [], unpack: [], source: null }; // synced entries whose bookmark isn't on this device (yet)
+  let SYNC_ON = true;
+  let lastSig = '';
+  let syncT;
+
+  let ACCOUNT = null;   // Google account email Chrome is signed in with; '' = not signed in; null = unknown
+
+  // Shows which Google account Chrome Sync will use (needs the identity.email permission)
+  async function refreshAccount() {
+    const el = $('#syncAccount');
+    if (!el) return;
+    let text = '', bad = false;
+    ACCOUNT = null;
+    if (!isExt) {
+      text = 'Preview mode — sync is simulated in this browser.';
+    } else if (!chrome.identity || !chrome.identity.getProfileUserInfo) {
+      text = 'The email permission is not active yet. In chrome://extensions remove Glass Home and Load unpacked again (or press ↻ and accept the new permission).';
+      bad = true;
+    } else {
+      try {
+        ACCOUNT = (await chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' })).email || '';
+        if (ACCOUNT) text = 'Syncing as ' + ACCOUNT;
+        else {
+          text = "Chrome did not report a signed-in Google account. Click your profile icon in Chrome and choose Turn on sync (being logged in to Gmail on the web is not enough). Until then settings stay on this device only.";
+          bad = true;
+        }
+      } catch (e) {
+        text = "Couldn't read the Google account: " + ((e && e.message) || e);
+        bad = true;
+      }
+    }
+    el.textContent = text;
+    el.classList.toggle('err', bad);
+  }
+
+  function setSyncStatus(msg, ok = true) {
+    const el = $('#syncStatus');
+    if (!el) return;
+    if (ok && ACCOUNT === '' && msg.startsWith('Synced')) msg = msg.replace('Synced', 'Saved') + ' (this device only)';
+    el.textContent = msg;
+    el.classList.toggle('err', !ok);
+  }
+
+  const profileBlob = () => { const b = clone(pick(S, PROFILE_KEYS)); if (b.cat === 'custom') delete b.cat; return b; }; // custom image is local-only
+  function applyBlob(b) {
+    const cat = S.cat;
+    Object.assign(S, clone(pick(DEFAULTS, PROFILE_KEYS)), clone(b || {}));
+    S.layout = { ...DEFAULTS.layout, ...S.layout };
+    S.show = { ...DEFAULTS.show, ...S.show };
+    if (!b || !('cat' in b)) S.cat = cat;
+  }
+
+  function persistProfiles() {
+    PBLOBS[ACTIVE] = profileBlob();
+    store.set('profiles', { list: PROFILES, blobs: PBLOBS, extra: EXTRA });
+  }
+
+  // bookmark id <-> portable key: bookmarks by URL, folders by their path
+  async function bookmarkKeys() {
+    let tree;
+    if (isExt) { try { tree = await chrome.bookmarks.getTree(); } catch { return null; } } else tree = await bookmarkTree();
+    const idKey = new Map(), keyId = new Map();
+    const add = (n, key) => { idKey.set(n.id, key); if (!keyId.has(key)) keyId.set(key, n.id); };
+    const walk = (n, path) => {
+      if (n.url) return add(n, 'u' + hash(n.url));
+      const p = [...path, n.title || ''];
+      add(n, 'f' + hash(p.join('/')));
+      (n.children || []).forEach((k) => walk(k, p));
+    };
+    ((tree[0] || {}).children || []).forEach((r) => walk(r, []));
+    return { idKey, keyId };
+  }
+
+  function buildShared(idKey) {
+    const assign = { ...EXTRA.assign };
+    for (const [id, v] of Object.entries(S.assign)) { const k = idKey.get(id); if (k) assign[k] = v; }
+    const keys = (ids) => ids.map((id) => idKey.get(id)).filter(Boolean);
+    return {
+      sections: S.sections,
+      collapsed: S.collapsed,
+      source: S.source === 'auto' ? (EXTRA.source || 'auto') : (idKey.get(S.source) || EXTRA.source || 'auto'),
+      assign,
+      order: [...new Set([...keys(S.order), ...EXTRA.order])],
+      unpack: [...new Set([...keys(S.unpack), ...EXTRA.unpack])]
+    };
+  }
+
+  function applyShared(sh, { keyId }) {
+    if (Array.isArray(sh.sections) && sh.sections.length) S.sections = sh.sections;
+    S.collapsed = sh.collapsed || [];
+    S.assign = {}; EXTRA.assign = {};
+    for (const [k, v] of Object.entries(sh.assign || {})) { const id = keyId.get(k); if (id) S.assign[id] = v; else EXTRA.assign[k] = v; }
+    const split = (list) => { const here = [], later = []; (list || []).forEach((k) => (keyId.has(k) ? here.push(keyId.get(k)) : later.push(k))); return [here, later]; };
+    [S.order, EXTRA.order] = split(sh.order);
+    [S.unpack, EXTRA.unpack] = split(sh.unpack);
+    const src = sh.source;
+    if (src && src !== 'auto' && keyId.has(src)) { S.source = keyId.get(src); EXTRA.source = null; }
+    else { S.source = 'auto'; EXTRA.source = src && src !== 'auto' ? src : null; }
+  }
+
+  // Bookmarks that arrive later (Chrome is still syncing them) get their saved section/order picked up here.
+  async function remapExtras() {
+    const maps = await bookmarkKeys();
+    if (!maps) return false;
+    const before = JSON.stringify(EXTRA);
+    applyShared(buildShared(maps.idKey), maps);
+    return JSON.stringify(EXTRA) !== before;
+  }
+
+  const syncSig = (profiles, blobs, shared) => JSON.stringify([profiles, profiles.map((p) => blobs[p.id] || {}), shared]);
+
+  async function pushSync() {
+    if (!SYNC_ON) return;
+    const maps = await bookmarkKeys();
+    if (!maps) return;
+    PBLOBS[ACTIVE] = profileBlob();
+    const shared = JSON.stringify(buildShared(maps.idKey));
+    const sig = syncSig(PROFILES, PBLOBS, shared);
+    if (sig === lastSig) return;
+    const CH = 3500;                          // chrome.storage.sync allows ~8 KB per item, so the shared part is chunked
+    const chunks = [];
+    for (let i = 0; i < shared.length; i += CH) chunks.push(shared.slice(i, i + CH));
+    const items = { ghs_meta: { v: 1, profiles: PROFILES, shared: chunks.length } };
+    PROFILES.forEach((pr) => { items['ghs_p_' + pr.id] = PBLOBS[pr.id] || {}; });
+    chunks.forEach((c, i) => { items['ghs_sh_' + i] = c; });
+    try {
+      const old = await syncArea.get(null);
+      const stale = Object.keys(old).filter((k) => k.startsWith('ghs_') && !(k in items));
+      await syncArea.set(items);
+      if (stale.length) await syncArea.remove(stale);
+      lastSig = sig;
+      setSyncStatus('Synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    } catch (e) {
+      setSyncStatus("Couldn't sync: " + ((e && e.message) || e), false);
+    }
+  }
+  function scheduleSync() { if (SYNC_ON) { clearTimeout(syncT); syncT = setTimeout(pushSync, 1500); } }
+
+  // Returns true when new data was applied, false when nothing changed, null when the cloud has nothing yet.
+  async function pullSync() {
+    if (!SYNC_ON) return false;
+    let all;
+    try { all = await syncArea.get(null); } catch (e) { setSyncStatus("Couldn't read sync: " + ((e && e.message) || e), false); return false; }
+    const meta = all.ghs_meta;
+    if (!meta || !Array.isArray(meta.profiles) || !meta.profiles.length) return null;
+    const blobs = {};
+    meta.profiles.forEach((pr) => { blobs[pr.id] = all['ghs_p_' + pr.id] || {}; });
+    let sharedStr = '';
+    for (let i = 0; i < (meta.shared || 0); i++) sharedStr += all['ghs_sh_' + i] || '';
+    const sig = syncSig(meta.profiles, blobs, sharedStr);
+    if (sig === lastSig) return false;
+    let shared;
+    try { shared = JSON.parse(sharedStr || '{}'); } catch { return false; }   // still arriving — the next change event retries
+    const maps = await bookmarkKeys();
+    if (!maps) return false;
+    PROFILES = meta.profiles; PBLOBS = blobs;
+    if (!PROFILES.some((pr) => pr.id === ACTIVE)) { ACTIVE = PROFILES[0].id; store.set('activeProfile', ACTIVE); }
+    applyBlob(PBLOBS[ACTIVE]);
+    applyShared(shared, maps);
+    lastSig = sig;
+    store.set('settings', S); persistProfiles();
+    setSyncStatus('Synced ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    return true;
+  }
+
+  function refreshAll(prevCat) {
+    applyVars(); placeWidgets(); syncInputs(); renderClock(true);
+    buildThemes(); buildSourceList(); buildSecList(); buildProfileList();
+    renderGrid({ animate: false }); buildBmList();
+    if (prevCat !== undefined && prevCat !== S.cat) changeWallpaper();
+  }
+
+  function watchSync() {
+    let t;
+    const fire = () => {
+      clearTimeout(t);
+      t = setTimeout(async () => { const prev = S.cat; if (await pullSync()) refreshAll(prev); }, 500);
+    };
+    if (isExt && chrome.identity && chrome.identity.onSignInChanged) chrome.identity.onSignInChanged.addListener(() => refreshAccount());
+    if (isExt && chrome.storage.sync) {
+      chrome.storage.onChanged.addListener((ch, area) => { if (area === 'sync' && Object.keys(ch).some((k) => k.startsWith('ghs_'))) fire(); });
+    } else {
+      window.addEventListener('storage', (e) => { if (e.key && e.key.startsWith('sync:')) fire(); });
+    }
+  }
+
+  async function initSync() {
+    const [prof, act, on] = await Promise.all([store.get('profiles'), store.get('activeProfile'), store.get('syncOn')]);
+    SYNC_ON = on !== false;
+    if (prof && Array.isArray(prof.list) && prof.list.length) {
+      PROFILES = prof.list; PBLOBS = prof.blobs || {}; EXTRA = { ...EXTRA, ...(prof.extra || {}) };
+    }
+    ACTIVE = PROFILES.some((pr) => pr.id === act) ? act : PROFILES[0].id;
+    if (!PBLOBS[ACTIVE]) PBLOBS[ACTIVE] = profileBlob();
+    if (SYNC_ON && (await pullSync()) === null) pushSync();   // first device: upload what is here
+    watchSync();
+  }
+
+  async function switchProfile(id) {
+    if (id === ACTIVE || !PROFILES.some((pr) => pr.id === id)) return;
+    PBLOBS[ACTIVE] = profileBlob();
+    const prev = S.cat;
+    ACTIVE = id;
+    store.set('activeProfile', id);
+    applyBlob(PBLOBS[id]);
+    save();
+    refreshAll(prev);
+  }
+
+  // New profile as a copy of `fromId` (default: the one in use); this device switches to it so it can be edited right away.
+  function newProfile(fromId) {
+    PBLOBS[ACTIVE] = profileBlob();
+    const from = PROFILES.find((pr) => pr.id === (fromId || ACTIVE)) || PROFILES[0];
+    const id = 'p' + Date.now().toString(36);
+    PROFILES = [...PROFILES, { id, name: fromId ? from.name + ' copy' : 'Profile ' + (PROFILES.length + 1) }];
+    PBLOBS[id] = clone(PBLOBS[from.id]);
+    switchProfile(id).then(() => { const ins = $('#profList').querySelectorAll('input'); ins[ins.length - 1].select(); });
+  }
+
+  function deleteProfile(id) {
+    if (PROFILES.length < 2) return;
+    PROFILES = PROFILES.filter((pr) => pr.id !== id);
+    delete PBLOBS[id];
+    if (ACTIVE === id) {
+      const prev = S.cat;
+      ACTIVE = PROFILES[0].id;
+      store.set('activeProfile', ACTIVE);
+      applyBlob(PBLOBS[ACTIVE]);
+      save(); refreshAll(prev);
+      return;
+    }
+    save(); buildProfileList();
+  }
+
+  function buildProfileList() {
+    const list = $('#profList');
+    if (!list) return;
+    list.innerHTML = '';
+    PROFILES.forEach((pr) => {
+      const row = document.createElement('div');
+      row.className = 'sec-row';
+      const inp = document.createElement('input');
+      inp.type = 'text'; inp.value = pr.name; inp.placeholder = 'Profile name';
+      inp.oninput = () => { pr.name = inp.value; save(); };
+      const use = document.createElement('button');
+      const on = pr.id === ACTIVE;
+      use.className = 'btn small' + (on ? ' solid' : ' ghost');
+      use.textContent = on ? 'Used here' : 'Use here';
+      use.disabled = on;
+      use.title = on ? 'This device uses this profile' : 'Use this profile on this device';
+      use.onclick = () => switchProfile(pr.id);
+      const del = document.createElement('button');
+      del.className = 'mini-btn'; del.title = 'Delete profile'; del.textContent = '✕'; del.disabled = PROFILES.length === 1;
+      del.onclick = () => deleteProfile(pr.id);
+      const dup = document.createElement('button');
+      dup.className = 'mini-btn'; dup.title = 'Duplicate as a new profile'; dup.textContent = '⧉';
+      dup.onclick = () => newProfile(pr.id);
+      row.append(inp, use, dup, del);
+      list.appendChild(row);
+    });
+    const sel = $('#deviceProfile');
+    sel.innerHTML = '';
+    PROFILES.forEach((pr) => { const o = document.createElement('option'); o.value = pr.id; o.textContent = pr.name || 'Untitled'; sel.appendChild(o); });
+    sel.value = ACTIVE;
+  }
+  $('#addProfile').onclick = () => newProfile();
+  $('#deviceProfile').onchange = (e) => switchProfile(e.target.value);
+
+  $('#syncOn').onchange = async (e) => {
+    SYNC_ON = e.target.checked;
+    store.set('syncOn', SYNC_ON);
+    refreshAccount();
+    if (!SYNC_ON) { setSyncStatus('Sync is off — this device keeps its own settings.'); return; }
+    lastSig = '';
+    const prev = S.cat;
+    const r = await pullSync();
+    if (r === null) await pushSync(); else if (r) refreshAll(prev);
+  };
+  $('#syncNow').onclick = async () => {
+    if (!SYNC_ON) { toast('Turn on sync first'); return; }
+    await refreshAccount();
+    lastSig = '';
+    const prev = S.cat;
+    const r = await pullSync();
+    if (r) refreshAll(prev); else await pushSync();
+    toast('Sync done');
+  };
 
   /* ================= Boot ================= */
   (async () => {
@@ -1342,6 +1701,12 @@
     S.layout = { ...DEFAULTS.layout, ...(S.layout || {}) };
     S.show = { ...DEFAULTS.show, ...(S.show || {}) };
     if (!Array.isArray(S.unpack)) S.unpack = [];
+    await initSync();
+    $('#syncOn').checked = SYNC_ON;
+    if (!SYNC_ON) setSyncStatus('Sync is off — this device keeps its own settings.');
+    else if (lastSig) setSyncStatus('Synced from your Google account');
+    buildProfileList();
+    refreshAccount();
     if (!saved || !saved.v) save();
     if (!isExt) {
       const b = document.createElement('div');

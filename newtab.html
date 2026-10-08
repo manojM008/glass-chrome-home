@@ -125,6 +125,7 @@
         <button class="nav-item" data-tab="sections"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span>Sections &amp; folders</span></button>
         <button class="nav-item" data-tab="clock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg><span>Clock</span></button>
         <button class="nav-item" data-tab="wallpaper"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.8"/><path d="m21 15-5-5L5 21"/></svg><span>Wallpaper</span></button>
+        <button class="nav-item" data-tab="profiles"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="14" height="10" rx="2"/><path d="M6 18h6M9 14v4"/><rect x="18" y="8" width="4" height="10" rx="1.5"/></svg><span>Profiles &amp; sync</span></button>
         <div class="side-foot">
           <button id="clearBg" class="btn ghost full" aria-pressed="false" title="Remove the blur and tint behind this window so you can see the wallpaper">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -199,9 +200,44 @@
       <button id="addSection" class="btn ghost full">+ Add section</button>
     </div>
     <div class="group">
-      <div class="group-title">Bookmarks bar</div>
+      <div class="group-title">Import bookmarks from</div>
+      <p class="fine">Pick the Chrome folder whose bookmarks appear as icons — the Bookmarks bar, Other bookmarks, or any folder. Nothing is copied or changed in Chrome.</p>
+      <label class="row-field"><span>Source</span><select id="setSource"></select></label>
+      <p class="fine" id="sourceNote"></p>
+      <button id="rescanSource" class="btn ghost full">↻ Rescan bookmarks</button>
+    </div>
+    <div class="group">
+      <div class="group-title">Bookmarks</div>
       <p class="fine">Pick a section for each bookmark, or hide it. Folders can be <b>unpacked</b> so their bookmarks show directly on the home screen.</p>
       <div id="bmList" class="bm-list"></div>
+    </div>
+        </section>
+        <section class="pane" data-tab="profiles">
+          <header class="pane-head"><h2>Profiles &amp; sync</h2><p>Different looks for different screens, kept in sync through your Google account.</p></header>
+    <div class="group">
+      <div class="group-title">This device</div>
+      <label class="row-field">
+        <span>Use profile</span>
+        <select id="deviceProfile"></select>
+      </label>
+      <p class="fine">Pick the profile for this device only. Several devices can use the same profile, and changing a profile changes it on every device that uses it. To try something different, duplicate it (⧉) and edit the copy.</p>
+    </div>
+    <div class="group">
+      <div class="group-title">Profiles</div>
+      <p class="fine">A profile stores how the page looks: icon size, icons per row, alignment, layout, clock and wallpaper theme. Each device remembers the profile you pick for it, for example “Laptop” on a small screen and “Monitor” on a big one. <b>+ New profile</b> copies the one this device is using.</p>
+      <div id="profList" class="sec-list"></div>
+      <button id="addProfile" class="btn ghost full">+ New profile</button>
+    </div>
+    <div class="group">
+      <div class="group-title">Sync across devices</div>
+      <label class="row-field">
+        <span>Sync with my Google account</span>
+        <input id="syncOn" type="checkbox" class="switch" checked>
+      </label>
+      <p class="fine">Profiles, sections, order and hidden items sync through Chrome Sync, so Chrome must be signed in with Sync on (check <b>chrome://settings/syncSetup</b>). Your bookmarks themselves are synced by Chrome. Site icons and the downloaded wallpaper copy stay on each device.</p>
+      <p class="fine" id="syncAccount"></p>
+      <p class="fine" id="syncStatus"></p>
+      <button id="syncNow" class="btn ghost full">↻ Sync now</button>
     </div>
         </section>
         <section class="pane" data-tab="clock">
