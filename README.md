@@ -15,6 +15,13 @@ Chrome will say it can "read data on all websites". That is only used to fetch e
 ### Updating after a `git pull`
 Click the ↻ reload icon on the Glass Home card in `chrome://extensions`, then open a new tab. Your settings are kept.
 
+## Profiles & sync across devices
+Settings → **Profiles & sync**.
+- **Profiles** store the look of the page (icon size, icons per row, alignment, layout, clock, wallpaper theme). Each device picks its own profile; several devices can share one. Duplicate (⧉) a profile to make a variant.
+- **Sync** uses Chrome Sync (your Google account), so Chrome must be signed in with Sync on. The settings page shows which account it is using; that is why the extension asks to "read your email address" (`identity.email`). The address is only displayed, never sent anywhere. Profiles, sections, order and hidden items are synced; sections and order are saved by bookmark URL because bookmark ids differ per device. Site icons and the downloaded wallpaper copy stay local.
+- `manifest.json` contains a fixed `key`, so the extension ID is `knjpfocoddhcdmkfbkadpghllojbajji` on every device. Sync needs that: **Load unpacked** this same folder (clone the repo) on each device.
+- The ID changed from earlier unpacked installs, so settings from the old install are not carried over. Remove the old Glass Home card in `chrome://extensions`.
+
 ### Testing tips
 - **Load unpacked** is local only; **Remove** undoes it completely.
 - To keep your normal new tab untouched, test in a separate Chrome profile.

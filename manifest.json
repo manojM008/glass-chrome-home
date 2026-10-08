@@ -2,10 +2,22 @@
   "manifest_version": 3,
   "name": "Glass Home",
   "description": "A modern frosted-glass new tab: your Bookmarks bar as app icons over beautiful free wallpapers.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1/M7llIe3LYFN/nxriYTLHidONle5vBSKSrgTBk8PIEpdul480U2P9LuzFEKs1SNOy94U4maop/X9r/TWhXR3wZhu//73vmVgmoX0XuW5kVU/+hetwkEq9VtfYnC44UA6n+ScB+0HEIovSOLPqsk5k4gtSNbxSjBseel+siJ8Aw55Mi2sxId1fIFAEU1WjfP7PuvqiA6oxdFDSzFUNy1upbA4ZTwpOIfYuLwb2/r/Aj3ug6/35bScrcmFccEC57wxm963APUoYjJ2aFfnRI6yoI5fDo0D2QLeMTTt4tVxdTIeGrwlYiKWNwL6SNmOik5kI2Rc8dSUCM7Wkd2yWma6wIDAQAB",
   "version": "2.0.0",
-  "chrome_url_overrides": { "newtab": "newtab.html" },
-  "permissions": ["bookmarks", "storage", "unlimitedStorage", "favicon"],
-  "host_permissions": ["<all_urls>"],
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
+  },
+  "permissions": [
+    "bookmarks",
+    "storage",
+    "unlimitedStorage",
+    "favicon",
+    "identity",
+    "identity.email"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "icons": {
     "16": "assets/icon16.png",
     "48": "assets/icon48.png",
