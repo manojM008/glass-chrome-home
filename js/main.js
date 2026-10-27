@@ -99,7 +99,7 @@
   }
 
   /* ================= Clock ================= */
-  // Each digit is its own slot; when a digit changes it rolls up into place.
+  // Each digit is its own slot; when a digit changes it fades in place.
   let lastClock = '';
   function renderClock(force) {
     const now = new Date();
@@ -124,13 +124,10 @@
     } else {
       const now2 = [...hh, ...m];
       el.querySelectorAll('.slot').forEach((slot, i) => {
-        const cur = slot.querySelector('.d:last-child');
-        if (cur.textContent === now2[i]) return;
-        const nd = document.createElement('span');
-        nd.className = 'd in'; nd.textContent = now2[i];
-        cur.classList.add('out');
-        slot.appendChild(nd);
-        setTimeout(() => cur.remove(), 700);
+        const d = slot.firstChild;
+        if (d.textContent === now2[i]) return;
+        d.textContent = now2[i];
+        d.classList.remove('tick'); void d.offsetWidth; d.classList.add('tick'); // one element per digit, short fade-in, no overlap
       });
       const ap = el.querySelector('.ampm');
       if (ap) ap.textContent = ampm;
@@ -711,7 +708,6 @@
     const el = document.createElement(folder ? 'button' : 'a');
     el.className = 'tile';
     el.dataset.id = node.id;
-    el.style.setProperty('--d', Math.min(i * 40, 800) + 'ms');
     el.title = node.title || node.url || '';
     el._node = node;
 
@@ -748,16 +744,26 @@
     label.textContent = node.title || hostOf(node.url);
     el.append(icon, label);
 
-    // 3D tilt + glare
+    // 3D tilt + glare (one style write per frame, rect read once per hover)
+    let rect = null, raf = 0, mx = 0, my = 0;
+    const paint = () => {
+      raf = 0;
+      const px = (mx - rect.left) / rect.width, py = (my - rect.top) / rect.height;
+      const st = icon.style;
+      st.setProperty('--ry', ((px - .5) * 18).toFixed(2) + 'deg');
+      st.setProperty('--rx', ((.5 - py) * 18).toFixed(2) + 'deg');
+      st.setProperty('--gx', (px * 100).toFixed(1) + '%');
+      st.setProperty('--gy', (py * 100).toFixed(1) + '%');
+    };
+    el.addEventListener('pointerenter', () => { rect = icon.getBoundingClientRect(); });
     el.addEventListener('pointermove', (e) => {
-      const r = icon.getBoundingClientRect();
-      const px = (e.clientX - r.left) / r.width, py = (e.clientY - r.top) / r.height;
-      icon.style.setProperty('--ry', ((px - .5) * 18).toFixed(2) + 'deg');
-      icon.style.setProperty('--rx', ((.5 - py) * 18).toFixed(2) + 'deg');
-      icon.style.setProperty('--gx', (px * 100).toFixed(1) + '%');
-      icon.style.setProperty('--gy', (py * 100).toFixed(1) + '%');
-    });
+      if (!rect) rect = icon.getBoundingClientRect();
+      mx = e.clientX; my = e.clientY;
+      if (!raf) raf = requestAnimationFrame(paint);
+    }, { passive: true });
     el.addEventListener('pointerleave', () => {
+      rect = null;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
       icon.style.setProperty('--rx', '0deg');
       icon.style.setProperty('--ry', '0deg');
     });
